@@ -8,8 +8,12 @@
     "./tokens": "./src/tokens/index.ts",
     "./tokens.css": "./dist/tokens.css"
   },
-  "files": ["src", "dist"],
+  "files": [
+    "src",
+    "dist"
+  ],
   "scripts": {
+    "prepare": "node scripts/gerar-css.mjs",
     "build": "node scripts/gerar-css.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -18,5 +22,8 @@
   "devDependencies": {
     "typescript": "5.9.3",
     "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
