@@ -319,6 +319,28 @@ jobs:
             cp -r site/homologacao/. publicar/homologacao/
             test -f publicar/homologacao/index.html
           fi
+      # Os certificados já emitidos são conferidos com a chave publicada, que deriva do segredo
+      # (CERTIFICADO_SEGREDO e CERTIFICADO_SEGREDO_HOMOLOGACAO). Se o segredo mudar ou se perder,
+      # todo selo antigo deixa de conferir: a publicação para aqui, antes de chegar ao site.
+      - name: Chave pública dos certificados igual à já publicada
+        env:
+          SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          conferir_chave() {
+            local arquivo="$1" url="$2" publicada
+            if [ ! -f "$arquivo" ]; then echo "::notice::Este build não tem $arquivo."; return 0; fi
+            if ! publicada="$(curl -fsSL --retry 3 "$url")"; then
+              echo "::notice::Ainda não há chave publicada em $url (primeira publicação?)."
+              return 0
+            fi
+            if [ "$(tr -d '[:space:]' < "$arquivo")" != "$(printf '%s' "$publicada" | tr -d '[:space:]')" ]; then
+              echo "::error::A chave pública de $url mudaria. Os certificados já emitidos deixariam de conferir. Confira o segredo dos certificados antes de publicar."
+              return 1
+            fi
+            echo "Chave pública igual à publicada: $url"
+          }
+          conferir_chave publicar/chave-publica-ed25519.txt "${SITE}chave-publica-ed25519.txt"
+          conferir_chave publicar/homologacao/chave-publica-ed25519.txt "${SITE}homologacao/chave-publica-ed25519.txt"
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
