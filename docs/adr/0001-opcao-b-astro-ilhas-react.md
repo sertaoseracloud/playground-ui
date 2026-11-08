@@ -1,6 +1,6 @@
 # ADR 0001: Astro nos cinco playgrounds, React com TypeScript só nas ilhas, e um pacote compartilhado
 
-- **Status:** aceita em 07/11/2026
+- **Status:** aceita em 07/11/2026; **substituída** em 08/11/2026 pelo [ADR 0003](0003-typescript-e-react-100.md) (TypeScript e React em 100%)
 - **Contexto completo:** `estudo-componentizacao/README.md` (estudo de esforço, mesma data)
 
 ## Contexto

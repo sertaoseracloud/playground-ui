@@ -2,7 +2,7 @@
 
 Design system e componentes compartilhados dos playgrounds da Sertão será cloud: DivergeGo, DivergeKubernetes, DivergePHP, DivergePython e DivergeTerraform.
 
-O motivo e o plano estão no [ADR 0001](docs/adr/0001-opcao-b-astro-ilhas-react.md), e as regras de projeto no [ADR 0002](docs/adr/0002-regras-de-projeto.md).
+A decisão em vigor é o [ADR 0003](docs/adr/0003-typescript-e-react-100.md): TypeScript e React em 100% dos playgrounds, sem invalidar nenhum certificado já emitido. Ele substitui o [ADR 0001](docs/adr/0001-opcao-b-astro-ilhas-react.md). As regras de projeto e os portões de cada PR estão no [ADR 0002](docs/adr/0002-regras-de-projeto.md).
 
 ## O que já tem (0.1.0)
 

@@ -27,6 +27,8 @@ flowchart LR
 
 Cada publicação monta o site inteiro (o `main` na raiz e o `develop` em `/homologacao/`), para uma nunca apagar a outra. Só uma publicação roda por vez em cada repositório, e nenhuma é cancelada no meio.
 
+**Certificados já emitidos:** antes de publicar, o job `montar` compara a chave pública do build (`chave-publica-ed25519.txt`) com a que já está no ar, em produção e na homologação. Se for diferente, a publicação para. Uma chave nova quer dizer que o segredo dos certificados mudou, e aí todo selo emitido deixaria de conferir. Na primeira publicação, sem chave no ar, o job só avisa. O contrato completo está no [ADR 0003](../adr/0003-typescript-e-react-100.md).
+
 ## Como usar num playground
 
 Copie [`docs/pipeline/exemplo.yml`](exemplo.yml) para `.github/workflows/pipeline.yml` e ajuste os `with:`:
