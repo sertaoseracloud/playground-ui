@@ -1,6 +1,6 @@
 {
   "name": "@sertaoseracloud/playground-ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Design system e componentes compartilhados dos playgrounds da Sertão será cloud",
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -13,17 +13,14 @@
     "dist"
   ],
   "scripts": {
-    "prepare": "node scripts/gerar-css.mjs",
     "build": "node scripts/gerar-css.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "verificar": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
+    "@types/node": "^24.19.2",
     "typescript": "5.9.3",
     "vitest": "^5.0.5"
-  },
-  "engines": {
-    "node": ">=24"
   }
 }

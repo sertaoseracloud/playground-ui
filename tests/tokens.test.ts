@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   NOMES_DE_TEMA, TEMAS, auditarTema, contraste, gerarCss, variavelCss,
   CAMADAS, ESPACOS, RAIOS, SOMBRAS, TAMANHOS,
@@ -76,5 +77,12 @@ describe('escalas', () => {
   it('as camadas não se repetem', () => {
     const valores = Object.values(CAMADAS);
     expect(new Set(valores).size).toBe(valores.length);
+  });
+});
+
+describe('dist/tokens.css', () => {
+  it('está em dia com os tokens (rode npm run build e versione o dist/)', () => {
+    const versionado = readFileSync(new URL('../dist/tokens.css', import.meta.url), 'utf8');
+    expect(versionado.replace(/\r\n/g, '\n')).toBe(gerarCss());
   });
 });
