@@ -1,0 +1,28 @@
+name: Pipeline
+
+# Gitflow com o pipeline único dos playgrounds (sertaoseracloud/playground-ui, docs/pipeline):
+# feature/** abre o PR para develop; PRs passam pelos portões; develop publica a
+# homologação e abre o PR para main; main publica a produção e cria a tag.
+on:
+  push:
+    branches: [main, develop, 'feature/**']
+  pull_request:
+    branches: [develop, main]
+  schedule:
+    - cron: '0 0 * * 0' # auditoria semanal (domingo, 0h UTC)
+  workflow_dispatch:
+
+# O que o pipeline pode fazer: o arquivo chamado não pode pedir mais que isto.
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  pipeline:
+    uses: sertaoseracloud/playground-ui/.github/workflows/playground.yml@pipeline-v1
+    with:
+      titulo: 'DivergePHP:'
+    # CERTIFICADO_SEGREDO, CERTIFICADO_SEGREDO_HOMOLOGACAO e FEATURE_PR_TOKEN (opcional).
+    secrets: inherit

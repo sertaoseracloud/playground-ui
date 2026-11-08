@@ -1,0 +1,476 @@
+name: Playground
+
+# Pipeline único dos playgrounds da Sertão será cloud (Go, Kubernetes, PHP, Python e
+# Terraform). Cada playground chama este arquivo com `uses: ...@pipeline-v1` e `secrets: inherit`
+# (veja docs/pipeline/exemplo.yml). O que roda depende do evento, seguindo o Gitflow:
+#
+#   push em feature/**   → feature-pr: sobe a versão patch e abre/atualiza o PR para develop
+#   pull_request         → qualidade, e2e, e2e-outros (informativo) e lighthouse
+#   push em develop      → portões + publica homologação (/homologacao/) + smoke + PR develop → main
+#   push em main         → portões + publica produção + smoke + tag e release v<versão>
+#   workflow_dispatch    → portões + publicação, como um push no branch escolhido
+#   schedule             → auditoria: Lighthouse no site no ar e arquivos comuns
+#
+# Cada publicação monta o site inteiro (main na raiz e develop em /homologacao/), para uma
+# nunca apagar a outra.
+
+on:
+  workflow_call:
+    inputs:
+      titulo:
+        description: "Começo do <title> que o smoke test procura (ex.: 'DivergePHP:')."
+        type: string
+        required: true
+      node-version:
+        description: Versão do Node.
+        type: string
+        default: '24'
+      go-version:
+        description: Versão do Go para o build (só o DivergeGo). Vazio = sem Go.
+        type: string
+        default: ''
+      astro-check:
+        description: Roda `npm run check` (astro check) na qualidade.
+        type: boolean
+        default: false
+      conferir-build:
+        description: Na qualidade, gera os builds de produção e homologação e roda scripts/conferir-build.mjs.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- feature → develop
+  feature-pr:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Com o secret FEATURE_PR_TOKEN (escrita em Contents e Pull requests), o PR criado aqui
+      # já dispara os checks. Sem ele, o PR sai com o token do Actions e os checks só rodam
+      # no próximo push do branch.
+      - name: Avisa quando o PR não vai disparar os checks sozinho
+        env:
+          FEATURE_PR_TOKEN: ${{ secrets.FEATURE_PR_TOKEN }}
+        run: |
+          if [ -z "$FEATURE_PR_TOKEN" ]; then
+            echo "::warning::Sem o secret FEATURE_PR_TOKEN: o PR é criado com o token do Actions e os checks rodam no próximo push."
+          fi
+      - uses: sertaoseracloud/playground-ui/.github/actions/preparar@pipeline-v1
+        with:
+          token: ${{ secrets.FEATURE_PR_TOKEN || github.token }}
+          node-version: ${{ inputs.node-version }}
+      - name: Garante a branch develop
+        env:
+          GH_TOKEN: ${{ secrets.FEATURE_PR_TOKEN || github.token }}
+        run: |
+          if ! git ls-remote --exit-code --heads origin develop > /dev/null; then
+            SHA_MAIN="$(git ls-remote --heads origin main | cut -f1)"
+            if [ -z "$SHA_MAIN" ]; then
+              echo "::error::Não foi possível localizar a branch main para criar develop."
+              exit 1
+            fi
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/heads/develop -f sha="$SHA_MAIN" \
+              || git ls-remote --exit-code --heads origin develop > /dev/null \
+              || { echo "::error::Não foi possível criar a branch develop."; exit 1; }
+          fi
+          git fetch origin develop:refs/remotes/origin/develop
+      - name: Sobe a versão patch uma vez por versão de develop
+        id: versao
+        run: |
+          BASE="$(git show origin/develop:package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).version))")"
+          ATUAL="$(node -p "require('./package.json').version")"
+          PROXIMA="$(BASE="$BASE" ATUAL="$ATUAL" node -e "
+            const ler = (v) => { const m = v.match(/^(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?$/); if (!m) throw new Error('Versão inválida: ' + v); return m.slice(1).map(Number); };
+            const b = ler(process.env.BASE); const a = ler(process.env.ATUAL);
+            const aFrente = a.some((p, i) => p !== b[i] && a.slice(0, i).every((v, j) => v === b[j]) && p > b[i]);
+            console.log(aFrente ? process.env.ATUAL : b.slice(0, 2).concat(b[2] + 1).join('.'));
+          ")"
+          echo "versao=$PROXIMA" >> "$GITHUB_OUTPUT"
+          if [ "$PROXIMA" = "$ATUAL" ]; then
+            echo "::notice::A feature já está em $ATUAL, acima da versão de develop ($BASE)."
+            exit 0
+          fi
+          npm version "$PROXIMA" --no-git-tag-version
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to $PROXIMA"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+      - name: Abre ou atualiza o PR para develop
+        env:
+          GH_TOKEN: ${{ secrets.FEATURE_PR_TOKEN || github.token }}
+          VERSAO: ${{ steps.versao.outputs.versao }}
+        run: |
+          PR="$(gh pr list --repo "$GITHUB_REPOSITORY" --base develop --head "$GITHUB_REF_NAME" --state all --json number,state,mergedAt,title --limit 1)"
+          NUMERO="$(echo "$PR" | jq -r '.[0].number // empty')"
+          ESTADO="$(echo "$PR" | jq -r '.[0].state // empty')"
+          MESCLADO="$(echo "$PR" | jq -r '.[0].mergedAt // empty')"
+          TITULO_ATUAL="$(echo "$PR" | jq -r '.[0].title // empty')"
+          TITULO="Promove $GITHUB_REF_NAME para develop (v$VERSAO)"
+          CORPO="A versão foi atualizada para $VERSAO. Os checks de qualidade, E2E e Lighthouse rodam neste PR."
+          # Título e descrição escritos por pessoas ficam: só o texto automático ("Promove ...") é trocado.
+          atualizar_texto() {
+            case "$TITULO_ATUAL" in
+              "Promove "*) gh pr edit "$NUMERO" --repo "$GITHUB_REPOSITORY" --title "$TITULO" --body "$CORPO" ;;
+              *) echo "::notice::O PR #$NUMERO tem título e descrição próprios; mantidos." ;;
+            esac
+          }
+          if [ "$ESTADO" = "OPEN" ]; then
+            atualizar_texto
+          elif [ "$ESTADO" = "CLOSED" ] && [ -z "$MESCLADO" ]; then
+            gh pr reopen "$NUMERO" --repo "$GITHUB_REPOSITORY"
+            atualizar_texto
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base develop --head "$GITHUB_REF_NAME" --title "$TITULO" --body "$CORPO"
+          fi
+
+  # ---------------------------------------------------------------- portões de qualidade
+  qualidade:
+    if: >-
+      github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: sertaoseracloud/playground-ui/.github/actions/preparar@pipeline-v1
+        with:
+          node-version: ${{ inputs.node-version }}
+          go-version: ${{ inputs.go-version }}
+      - run: npm run lint -- --max-warnings 0
+      - name: Checagem das páginas do Astro (astro check)
+        if: inputs.astro-check
+        run: npm run check
+      - name: Arquivos comuns aos playgrounds (veja comuns.json)
+        run: npm run comuns
+      - name: Testes com cobertura (o limite está no vitest.config.js)
+        run: npm run test:cobertura
+      - name: Build e conferência de produção e homologação
+        if: inputs.conferir-build
+        run: |
+          CERTIFICADO_SEGREDO="$(openssl rand -hex 32)" npm run build
+          node scripts/conferir-build.mjs dist principal
+          mkdir -p principal-validation
+          cp dist/chave-publica-ed25519.txt principal-validation/
+          HOMOLOGACAO=1 CERTIFICADO_SEGREDO_HOMOLOGACAO="$(openssl rand -hex 32)" npm run build
+          node scripts/conferir-build.mjs dist homologacao --comparar principal-validation
+      - name: npm audit (dependências com falha alta ou crítica)
+        run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cobertura
+          path: coverage/
+
+  e2e:
+    needs: qualidade
+    runs-on: ubuntu-latest
+    steps:
+      - uses: sertaoseracloud/playground-ui/.github/actions/preparar@pipeline-v1
+        with:
+          node-version: ${{ inputs.node-version }}
+          go-version: ${{ inputs.go-version }}
+          playwright: chromium
+      # Segredo aleatório, gerado aqui e descartado: os testes não dependem do de produção.
+      - name: Build
+        run: CERTIFICADO_SEGREDO="$(openssl rand -hex 32)" npm run build
+      - name: E2E no Chromium (bloqueia)
+        run: npx playwright test --project=chromium
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+
+  e2e-outros:
+    needs: qualidade
+    runs-on: ubuntu-latest
+    continue-on-error: true # informativo: Firefox, WebKit e celular viram itens, não bloqueiam
+    steps:
+      - uses: sertaoseracloud/playground-ui/.github/actions/preparar@pipeline-v1
+        with:
+          node-version: ${{ inputs.node-version }}
+          go-version: ${{ inputs.go-version }}
+          playwright: todos
+      - name: Build
+        run: CERTIFICADO_SEGREDO="$(openssl rand -hex 32)" npm run build
+      - name: E2E no Firefox, WebKit e celular (informativo)
+        run: npx playwright test --project=firefox --project=webkit --project=mobile
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report-outros
+          path: playwright-report/
+
+  lighthouse:
+    needs: qualidade
+    runs-on: ubuntu-latest
+    steps:
+      - uses: sertaoseracloud/playground-ui/.github/actions/preparar@pipeline-v1
+        with:
+          node-version: ${{ inputs.node-version }}
+          go-version: ${{ inputs.go-version }}
+      - name: Build
+        run: CERTIFICADO_SEGREDO="$(openssl rand -hex 32)" npm run build
+      - name: Lighthouse CI (SEO e acessibilidade >= 0,9; CLS <= 0,1)
+        run: npm run lighthouse
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lighthouse
+          path: .lighthouseci/
+          include-hidden-files: true
+          retention-days: 30
+
+  # ---------------------------------------------------------------- publicação (develop e main)
+  principal:
+    needs: [qualidade, e2e, lighthouse]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: sertaoseracloud/playground-ui/.github/actions/preparar@pipeline-v1
+        with:
+          ref: main
+          node-version: ${{ inputs.node-version }}
+          go-version: ${{ inputs.go-version }}
+      - run: npm run build
+        env:
+          # Palavra secreta do selo dos certificados (Settings > Secrets > Actions).
+          CERTIFICADO_SEGREDO: ${{ secrets.CERTIFICADO_SEGREDO }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: site-principal
+          path: dist/
+          retention-days: 1
+
+  homologacao:
+    needs: [qualidade, e2e, lighthouse]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      existe: ${{ steps.develop.outputs.existe }}
+    steps:
+      # Sem o branch develop, o site sai só com o principal.
+      - id: develop
+        name: O branch develop existe?
+        run: |
+          if git ls-remote --exit-code --heads "https://github.com/${{ github.repository }}" develop > /dev/null; then
+            echo "existe=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existe=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Sem o branch develop: a homologação não é publicada."
+          fi
+      - uses: sertaoseracloud/playground-ui/.github/actions/preparar@pipeline-v1
+        if: steps.develop.outputs.existe == 'true'
+        with:
+          ref: develop
+          node-version: ${{ inputs.node-version }}
+          go-version: ${{ inputs.go-version }}
+      - if: steps.develop.outputs.existe == 'true'
+        run: npm run build
+        env:
+          HOMOLOGACAO: '1'
+          # Outro segredo: certificado emitido na homologação não vale no site principal.
+          CERTIFICADO_SEGREDO_HOMOLOGACAO: ${{ secrets.CERTIFICADO_SEGREDO_HOMOLOGACAO }}
+      - uses: actions/upload-artifact@v7
+        if: steps.develop.outputs.existe == 'true'
+        with:
+          name: site-homologacao
+          path: dist/
+          retention-days: 1
+
+  montar:
+    needs: [principal, homologacao]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: site-principal
+          path: site/principal
+      - uses: actions/download-artifact@v7
+        if: needs.homologacao.outputs.existe == 'true'
+        with:
+          name: site-homologacao
+          path: site/homologacao
+      # As conferências usam o script do commit que disparou a publicação, se ele existir.
+      - name: Monta o site (principal na raiz, homologação em /homologacao/)
+        env:
+          COM_HOMOLOGACAO: ${{ needs.homologacao.outputs.existe }}
+        run: |
+          conferir() { if [ -f scripts/conferir-build.mjs ]; then node scripts/conferir-build.mjs "$@"; fi; }
+          conferir site/principal principal
+          mkdir -p publicar
+          cp -r site/principal/. publicar/
+          test -f publicar/index.html
+          if [ "$COM_HOMOLOGACAO" = "true" ]; then
+            conferir site/homologacao homologacao --comparar site/principal
+            mkdir -p publicar/homologacao
+            cp -r site/homologacao/. publicar/homologacao/
+            test -f publicar/homologacao/index.html
+          fi
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: publicar
+
+  publicar:
+    needs: montar
+    runs-on: ubuntu-latest
+    # Uma publicação por vez por repositório, e nenhuma é cancelada no meio.
+    concurrency:
+      group: pages-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
+  smoke:
+    needs: [publicar, homologacao]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke test de produção
+        env:
+          URL_PRINCIPAL: ${{ needs.publicar.outputs.page_url }}
+          TITULO: ${{ inputs.titulo }}
+        run: |
+          curl --fail --location --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors "$URL_PRINCIPAL" -o principal.html
+          grep -qF "<title>$TITULO" principal.html
+          if grep -q '<meta name="robots" content="noindex">' principal.html; then
+            echo "::error::O site principal foi publicado com noindex."
+            exit 1
+          fi
+      - name: Smoke test de homologação
+        if: needs.homologacao.outputs.existe == 'true'
+        env:
+          URL_PRINCIPAL: ${{ needs.publicar.outputs.page_url }}
+          TITULO: ${{ inputs.titulo }}
+        run: |
+          URL_HOMOLOGACAO="${URL_PRINCIPAL%/}/homologacao/"
+          curl --fail --location --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors "$URL_HOMOLOGACAO" -o homologacao.html
+          grep -qF "<title>$TITULO" homologacao.html
+          grep -q '<meta name="robots" content="noindex">' homologacao.html
+
+  # Só no main: cria a tag v<versão do package.json> e a release, se ainda não existirem (nunca força).
+  tag:
+    needs: smoke
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag e release da versão
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSAO="$(node -p "require('./package.json').version")"
+          TAG="v$VERSAO"
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "::notice::A tag $TAG já existe."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Versão $VERSAO"
+            git push origin "$TAG"
+          fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::notice::A release $TAG já existe: nada a fazer."
+          elif [ -f scripts/notas-release.mjs ]; then
+            # A release usa o texto da versão em src/novidades.js, o mesmo da página de novidades.
+            node scripts/notas-release.mjs "$VERSAO" > notas-release.md
+            gh release create "$TAG" --verify-tag --latest \
+              --title "$(node scripts/notas-release.mjs "$VERSAO" --titulo)" --notes-file notas-release.md
+          else
+            gh release create "$TAG" --verify-tag --latest --title "$TAG" --generate-notes
+          fi
+
+  # Só no develop: depois da homologação publicada e do smoke, abre (ou reabre) o PR para main.
+  promover:
+    needs: smoke
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Um PR aberto com o token do Actions não dispara os checks. Com o secret
+      # FEATURE_PR_TOKEN, o PR já nasce com os checks; sem ele, feche e reabra o PR.
+      - name: Abre ou reabre o PR de homologação para produção
+        env:
+          GH_TOKEN: ${{ secrets.FEATURE_PR_TOKEN || github.token }}
+          SEM_TOKEN: ${{ secrets.FEATURE_PR_TOKEN == '' }}
+        run: |
+          if [ "$SEM_TOKEN" = "true" ]; then
+            echo "::warning::Sem o secret FEATURE_PR_TOKEN: feche e reabra o PR de develop para main para disparar os checks."
+          fi
+          AHEAD="$(gh api "repos/$GITHUB_REPOSITORY/compare/main...develop" --jq '.ahead_by')"
+          if [ "$AHEAD" -eq 0 ]; then
+            echo "::notice::develop não tem commits novos para promover a main."
+            exit 0
+          fi
+          PR="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head develop --state all --json number,state,mergedAt --limit 1)"
+          NUMERO="$(echo "$PR" | jq -r '.[0].number // empty')"
+          ESTADO="$(echo "$PR" | jq -r '.[0].state // empty')"
+          MESCLADO="$(echo "$PR" | jq -r '.[0].mergedAt // empty')"
+          if [ "$ESTADO" = "OPEN" ]; then
+            echo "::notice::O PR #$NUMERO de develop para main já está aberto."
+          elif [ "$ESTADO" = "CLOSED" ] && [ -z "$MESCLADO" ]; then
+            gh pr reopen "$NUMERO" --repo "$GITHUB_REPOSITORY"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head develop \
+              --title "Promove develop para main" \
+              --body "Os testes passaram, a homologação foi publicada e o smoke test está verde. Revise as alterações antes de mesclar em produção."
+          fi
+
+  # ---------------------------------------------------------------- auditoria semanal
+  auditoria-lighthouse:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+      # Lighthouse no site que está no ar (principal e homologação): pega o que muda sem commit.
+      - name: Lighthouse no site no ar
+        env:
+          SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          npx --yes @lhci/cli@0.15.1 collect --no-lighthouserc --numberOfRuns=3 --url="$SITE" --url="${SITE}homologacao/"
+          npx --yes @lhci/cli@0.15.1 upload --no-lighthouserc --target=filesystem --outputDir=.lighthouseci
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: auditoria-semanal
+          path: .lighthouseci/
+          include-hidden-files: true
+          retention-days: 30
+
+  auditoria-comuns:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Arquivos comuns iguais nos playgrounds
+        run: node scripts/comuns.mjs comparar

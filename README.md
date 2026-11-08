@@ -39,6 +39,10 @@ node scripts/comparar-css.mjs ../go-playground/src/estilo.css   # cores iguais �
 3. Casca e páginas comuns em `.astro`, mais o painel de acessibilidade.
 4. Domínio comum em TS: progresso, preferências, certificados, contrato `Motor`.
 
+## Pipeline de CI/CD
+
+Este repositório também guarda o **pipeline único** dos playgrounds: um workflow reutilizável com todo o Gitflow (feature → develop → main), chamado por cada playground com `uses: sertaoseracloud/playground-ui/.github/workflows/playground.yml@pipeline-v1` e `secrets: inherit`. Ele só roda quando é chamado (`on: workflow_call`), nunca neste repositório. Detalhes em [docs/pipeline/README.md](docs/pipeline/README.md).
+
 ## Licença
 
 AGPL-3.0-or-later, a mesma dos playgrounds.

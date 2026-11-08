@@ -1,0 +1,51 @@
+name: Preparar o playground
+description: >-
+  Checkout com o histórico completo (a página de novidades lê o git log), Node com cache
+  do npm, npm ci e, quando pedido, Go (runtime do navegador do DivergeGo) e os navegadores
+  do Playwright.
+
+inputs:
+  ref:
+    description: Branch, tag ou commit para o checkout. Vazio = o commit do evento.
+    default: ''
+  token:
+    description: Token do checkout (para dar push depois). Vazio = o token do Actions.
+    default: ''
+  node-version:
+    description: Versão do Node.
+    default: '24'
+  go-version:
+    description: Versão do Go. Vazio = não instala o Go.
+    default: ''
+  playwright:
+    description: "Navegadores do Playwright: '' (nenhum), 'chromium' ou 'todos'."
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: 0
+        token: ${{ inputs.token || github.token }}
+    - uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+    - uses: actions/setup-go@v6
+      if: inputs.go-version != ''
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache-dependency-path: go-wasm/go.sum
+    - name: npm ci
+      shell: bash
+      run: npm ci
+    - name: Navegadores do Playwright (Chromium)
+      if: inputs.playwright == 'chromium'
+      shell: bash
+      run: npx playwright install --with-deps chromium
+    - name: Navegadores do Playwright (todos)
+      if: inputs.playwright == 'todos'
+      shell: bash
+      run: npx playwright install --with-deps
