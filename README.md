@@ -42,7 +42,7 @@ node scripts/comparar-css.mjs ../go-playground/src/estilo.css   # cores iguais �
 
 ## Pipeline de CI/CD
 
-Este repositório também guarda o **pipeline único** dos playgrounds: um workflow reutilizável com todo o Gitflow (feature → develop → main), chamado por cada playground com `uses: sertaoseracloud/playground-ui/.github/workflows/playground.yml@pipeline-v1` e `secrets: inherit`. Ele só roda quando é chamado (`on: workflow_call`), nunca neste repositório. Detalhes em [docs/pipeline/README.md](docs/pipeline/README.md).
+Este repositório também guarda o **pipeline único** dos playgrounds: um workflow reutilizável com todo o Gitflow (feature → develop → main), chamado por cada playground com `uses: sertaoseracloud/playground-ui/.github/workflows/playground.yml@pipeline-v1.0.2` (versão fixa) e `secrets: inherit`. Ele só roda quando é chamado (`on: workflow_call`), nunca neste repositório. Detalhes em [docs/pipeline/README.md](docs/pipeline/README.md).
 
 ## Licença
 

@@ -1,7 +1,7 @@
 name: Playground
 
 # Pipeline único dos playgrounds da Sertão será cloud (Go, Kubernetes, PHP, Python e
-# Terraform). Cada playground chama este arquivo com `uses: ...@pipeline-v1` e `secrets: inherit`
+# Terraform). Cada playground chama este arquivo com `uses: ...@pipeline-v1.x.y` (versão fixa) e `secrets: inherit`
 # (veja docs/pipeline/exemplo.yml). O que roda depende do evento, seguindo o Gitflow:
 #
 #   push em feature/**   → feature-pr: sobe a versão patch e abre/atualiza o PR para develop

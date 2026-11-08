@@ -38,7 +38,7 @@ Copie [`docs/pipeline/exemplo.yml`](exemplo.yml) para `.github/workflows/pipelin
 ```yaml
 jobs:
   pipeline:
-    uses: sertaoseracloud/playground-ui/.github/workflows/playground.yml@pipeline-v1
+    uses: sertaoseracloud/playground-ui/.github/workflows/playground.yml@pipeline-v1.0.2
     with:
       titulo: 'DivergePHP:'
     secrets: inherit
@@ -64,10 +64,16 @@ jobs:
 
 ## Versões
 
-O pipeline tem tags próprias, separadas das versões do pacote (`v0.x.y`). Os playgrounds apontam para a tag **`pipeline-v1`**, que acompanha a última versão compatível. A action composta [`.github/actions/preparar`](../../.github/actions/preparar/action.yml) (checkout com histórico, Node, `npm ci`, Go e Playwright) é chamada pela mesma tag.
+O pipeline tem tags próprias, separadas das versões do pacote (`v0.x.y`). **Os playgrounds apontam para uma versão fixa** (`@pipeline-v1.0.2` desde 08/11/2026), nunca para uma tag que se move. Toda atualização do pipeline entra em cada playground por um PR, com os checks rodando, sem push forçado de tag.
 
-- **Mudança compatível:** crie a tag da versão (`pipeline-v1.0.1`) e mova a `pipeline-v1` para ela (`git tag -f pipeline-v1 && git push -f origin pipeline-v1`). Todos os playgrounds passam a usar a versão nova no próximo run.
-- **Mudança incompatível** (entrada nova obrigatória, job renomeado): crie a `pipeline-v2` e atualize os playgrounds um por um.
+Para lançar uma versão:
+
+1. Mude o `playground.yml` (ou a action composta [`.github/actions/preparar`](../../.github/actions/preparar/action.yml)) e valide com `npx @action-validator/cli .github/workflows/playground.yml`.
+2. **Se a action composta mudou,** troque no `playground.yml` as referências `preparar@…` para o nome da tag que vai ser criada (por exemplo, `preparar@pipeline-v1.0.3`). A tag aponta para o próprio commit, então a referência resolve na hora do run.
+3. Faça o commit e crie a tag nova (`pipeline-v1.0.3`) sem mover nenhuma existente.
+4. Abra nos playgrounds um PR trocando `@pipeline-v1.0.2` por `@pipeline-v1.0.3` e faça o merge depois dos checks.
+
+Mudança incompatível (entrada nova obrigatória, job renomeado): a versão vai para `pipeline-v2.0.0` e os PRs ajustam o `with:` junto. As tags antigas, inclusive a `pipeline-v1`, ficam onde estão: não as mova nem as apague, porque a action composta ainda é chamada por `preparar@pipeline-v1`.
 
 Os nomes dos checks nos PRs ficam `pipeline / qualidade`, `pipeline / e2e` e `pipeline / lighthouse`. São esses nomes que um ruleset deve exigir.
 
