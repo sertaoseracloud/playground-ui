@@ -144,10 +144,17 @@ jobs:
       - name: Checagem das páginas do Astro (astro check)
         if: inputs.astro-check
         run: npm run check
+      # Migração para TypeScript (ADR 0003): cada passo só roda quando o repositório tem o script.
+      - name: Tipos (npm run tipos, quando existir)
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.tipos ? 0 : 1)"; then npm run tipos; else echo "Sem o script tipos."; fi
       - name: Arquivos comuns aos playgrounds (veja comuns.json)
         run: npm run comuns
       - name: Testes com cobertura (o limite está no vitest.config.js)
         run: npm run test:cobertura
+      - name: Contrato do motor (npm run test:contrato, quando existir)
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.['test:contrato'] ? 0 : 1)"; then npm run test:contrato; else echo "Sem o script test:contrato."; fi
       - name: Build e conferência de produção e homologação
         if: inputs.conferir-build
         run: |
@@ -174,6 +181,10 @@ jobs:
           node-version: ${{ inputs.node-version }}
           go-version: ${{ inputs.go-version }}
           playwright: chromium
+      # Testes de componente num Chromium de verdade (Vitest no modo navegador), quando existirem.
+      - name: Testes de componente (npm run test:componentes, quando existir)
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.['test:componentes'] ? 0 : 1)"; then npm run test:componentes; else echo "Sem o script test:componentes."; fi
       # Segredo aleatório, gerado aqui e descartado: os testes não dependem do de produção.
       - name: Build
         run: CERTIFICADO_SEGREDO="$(openssl rand -hex 32)" npm run build

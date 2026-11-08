@@ -10,6 +10,7 @@ A decisão em vigor é o [ADR 0003](docs/adr/0003-typescript-e-react-100.md): Ty
 - **Teste de contraste WCAG 2.2** de todos os pares que o design system garante: texto, texto secundário, cores de destaque, texto sobre botão colorido, foco e borda de controle.
 - **Escalas**: tipografia (`--tam-*`), espaçamento (`--espaco-*`), raios (`--raio-*`), sombras (`--sombra-*`) e camadas (`--camada-*`). De onde veio cada passo e como trocar os valores de hoje está em [docs/escalas.md](docs/escalas.md).
 - **`dist/tokens.css`**, gerado a partir dos tokens e versionado no repositório: quem instala pelo git não precisa compilar nada. Um teste confere que ele está em dia.
+- **`tsconfig.base.json`** (0.2.0): a configuração estrita comum da migração para TypeScript. Cada playground estende com `"extends": "@sertaoseracloud/playground-ui/tsconfig.base.json"`. Durante a migração, `allowJs` fica ligado e `checkJs`, desligado.
 
 ## Usar
 
