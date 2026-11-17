@@ -58,7 +58,9 @@ Quem recebeu um certificado tem um link (`#/certificado/<código>`, `#/validar/<
 
 ## Consequências
 
-- O esforço estimado sobe de 58–88 para 128–186 dias-pessoa. Com duas pessoas, são de 14 a 20 semanas.
+- O esforço estimado sobe de 58–88 para 119–181 dias-pessoa. Com duas pessoas, são de 13 a 20 semanas. (A primeira conta, de 128–186, foi revisada em 08/11 com a análise de design de código: `estudo-componentizacao/estudo-v2.md`.)
+- A tela do exercício é uma ilha só, `Exercicio`, no pacote, sobre o contrato `Motor` (`estudo-componentizacao/analise-codigo/contrato-motor.md`). Cada repositório encaixa os seus painéis por *slot*.
+- Antes da fase 0 vem uma fase −1, ainda em JavaScript: limpeza do código morto, 3 defeitos achados e refatorações de baixo risco (registro de regras, porta de persistência, simulador do Kubernetes sem estado global).
 - O `comuns.json` some à medida que as telas vão para o pacote.
 - O pipeline ganha os jobs `tipos`, `componentes` e `contrato`, que só rodam quando o repositório tem o script correspondente.
 - Uma mudança no módulo de certificados exige a revisão de quem conhece este contrato, mesmo com os testes verdes.
